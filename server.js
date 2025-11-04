@@ -11,6 +11,8 @@ const xlsx = require("xlsx"); // Import the xlsx library
 require("dotenv").config();
 
 const app = express();
+app.set("trust proxy", 1);
+
 
 const port = process.env.PORT;
 if (!port) {
@@ -146,20 +148,18 @@ app.post("/api/users", async (req, res) => {
 
 app.post("/api/login", (req, res) => {
   const { userName, password } = req.body;
-
   if (!userName || !password) {
-    return res
-      .status(400)
-      .json({ message: "Username and password are required." });
+    return res.status(400).json({ message: "Username and password are required." });
   }
-  const sql = "SELECT * FROM users WHERE  username = ?";
+
+  const sql = "SELECT * FROM users WHERE userName = ?"; // <-- FIXED
   db.query(sql, [userName], async (err, results) => {
     if (err) {
       console.error("Error fetching user:", err);
-      return res.status(500).json({ message: "Databse error." });
+      return res.status(500).json({ message: "Database error." }); // <-- FIXED typo
     }
     if (results.length === 0) {
-      res.status(401).json({ message: "Invalid credentials." });
+      return res.status(401).json({ message: "Invalid credentials." }); // <-- return!
     }
 
     const user = results[0];
@@ -186,12 +186,13 @@ app.post("/api/login", (req, res) => {
       maxAge: 60 * 60 * 1000,
     });
 
-    res.json({
+    return res.json({
       message: "Login successful",
       user: { id: user.id, userName: user.userName, role: user.role },
     });
   });
 });
+
 
 app.get("/api/users/admin-exists", (req, res) => {
   const sql = "SELECT COUNT(*) AS count FROM users WHERE role = 'admin'";
@@ -208,11 +209,12 @@ app.get("/api/users/admin-exists", (req, res) => {
 app.post("/api/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
-    sameSite: "lax",
-    secure: false,
+    sameSite: "none",
+    secure: true,
   });
-  res.json({ message: "Logged out successfully" });
+  return res.json({ message: "Logged out successfully" });
 });
+
 
 app.get("/api/protected", cookieAuthMiddleware, (req, res) => {
   res.json({ message: "You are authenticated!", user: req.user });
