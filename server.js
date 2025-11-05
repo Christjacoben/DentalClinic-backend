@@ -46,20 +46,20 @@ app.use(
     credentials: true,
   })
 );
-app.set("trust proxy", 1);
 
-function verifyToken(req, res, next) {
-  const token = req.cookies?.token; // use cookie-parser
-  if (!token) return res.status(401).json({ error: "Access denied, No token provided." });
-
+const cookieAuthMiddleware = (req, res, next) => {
+  const token = req.cookies.token;
+  if (!token) {
+    return res.status(401).json({ error: "Access denied, No token provided." });
+  }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
-  } catch (err) {
-    res.status(401).json({ error: "Invalid token" });
+  } catch (error) {
+    return res.status(401).json({ error: "Invalid or expired token." });
   }
-}
+};
 
 cron.schedule("0 0 * * *", async () => {
   console.log("Running scheduler to check unconfirmed appointments...");
@@ -144,19 +144,22 @@ app.post("/api/users", async (req, res) => {
 });
 
 app.post("/api/login", (req, res) => {
+  console.log("Login request body:", req.body);
   const { userName, password } = req.body;
-  if (!userName || !password) {
-    return res.status(400).json({ message: "Username and password are required." });
-  }
 
-  const sql = "SELECT * FROM users WHERE userName = ?"; // <-- FIXED
+  if (!userName || !password) {
+    return res
+      .status(400)
+      .json({ message: "Username and password are required." });
+  }
+  const sql = "SELECT * FROM users WHERE  userName = ?";
   db.query(sql, [userName], async (err, results) => {
     if (err) {
       console.error("Error fetching user:", err);
-      return res.status(500).json({ message: "Database error." }); // <-- FIXED typo
+      return res.status(500).json({ message: "Databse error." });
     }
     if (results.length === 0) {
-      return res.status(401).json({ message: "Invalid credentials." }); // <-- return!
+      res.status(401).json({ message: "Invalid credentials." });
     }
 
     const user = results[0];
@@ -180,17 +183,15 @@ app.post("/api/login", (req, res) => {
       httpOnly: true,
       sameSite: "none",
       secure: true,
-        path: "/", 
       maxAge: 60 * 60 * 1000,
     });
 
-    return res.json({
+    res.json({
       message: "Login successful",
       user: { id: user.id, userName: user.userName, role: user.role },
     });
   });
 });
-
 
 app.get("/api/users/admin-exists", (req, res) => {
   const sql = "SELECT COUNT(*) AS count FROM users WHERE role = 'admin'";
@@ -210,15 +211,14 @@ app.post("/api/logout", (req, res) => {
     sameSite: "none",
     secure: true,
   });
-  return res.json({ message: "Logged out successfully" });
+  res.json({ message: "Logged out successfully" });
 });
 
-
-app.get("/api/protected", verifyToken, (req, res) => {
+app.get("/api/protected", cookieAuthMiddleware, (req, res) => {
   res.json({ message: "You are authenticated!", user: req.user });
 });
 
-app.post("/api/user-info", verifyToken, (req, res) => {
+app.post("/api/user-info", cookieAuthMiddleware, (req, res) => {
   const { lastName, address, contact } = req.body;
   const { userName } = req.user;
 
@@ -240,7 +240,7 @@ app.post("/api/user-info", verifyToken, (req, res) => {
   });
 });
 
-app.post("/api/appointments", verifyToken, (req, res) => {
+app.post("/api/appointments", cookieAuthMiddleware, (req, res) => {
   const {
     userName,
     firstName,
@@ -327,7 +327,7 @@ app.post("/api/appointments", verifyToken, (req, res) => {
 
 app.post(
   "/api/appointments/:id/confirm",
-  verifyToken,
+  cookieAuthMiddleware,
   async (req, res) => {
     const { id } = req.params;
     const { contact, firstName, lastName, dentalProcedure, date } = req.body;
@@ -377,7 +377,7 @@ app.post(
     });
   }
 );
-app.post("/api/appointments/:id/finish", verifyToken, (req, res) => {
+app.post("/api/appointments/:id/finish", cookieAuthMiddleware, (req, res) => {
   const { id } = req.params;
   const sql = "UPDATE appointments SET status = 'finished' WHERE id = ?";
   db.query(sql, [id], (err, result) => {
@@ -389,7 +389,7 @@ app.post("/api/appointments/:id/finish", verifyToken, (req, res) => {
   });
 });
 
-app.get("/api/users", verifyToken, (req, res) => {
+app.get("/api/users", cookieAuthMiddleware, (req, res) => {
   const sql =
     "SELECT id, name, userName, lastName,  address, contact, role FROM users";
   db.query(sql, (err, results) => {
@@ -402,7 +402,7 @@ app.get("/api/users", verifyToken, (req, res) => {
 });
 
 // Delete user and store in deleted_users table
-app.delete("/api/users/:id", verifyToken, (req, res) => {
+app.delete("/api/users/:id", cookieAuthMiddleware, (req, res) => {
   const { id } = req.params;
 
   const selectSql = "SELECT * FROM users WHERE id = ?";
@@ -451,7 +451,7 @@ app.delete("/api/users/:id", verifyToken, (req, res) => {
 });
 
 // Delete appointment and store in deleted_appointments table
-app.delete("/api/appointments/:id", verifyToken, (req, res) => {
+app.delete("/api/appointments/:id", cookieAuthMiddleware, (req, res) => {
   const { id } = req.params;
 
   const selectSql = "SELECT * FROM appointments WHERE id = ?";
@@ -504,7 +504,7 @@ app.delete("/api/appointments/:id", verifyToken, (req, res) => {
 
 app.put(
   "/api/appointments/:id/reschedule",
-  verifyToken,
+  cookieAuthMiddleware,
   (req, res) => {
     const { id } = req.params;
     const { date, time } = req.body;
@@ -585,7 +585,7 @@ app.put(
   }
 );
 
-app.put("/api/users/:id/password", verifyToken, async (req, res) => {
+app.put("/api/users/:id/password", cookieAuthMiddleware, async (req, res) => {
   const { id } = req.params;
   const { newPassword } = req.body;
   if (!newPassword) {
@@ -607,7 +607,7 @@ app.put("/api/users/:id/password", verifyToken, async (req, res) => {
   }
 });
 
-app.put("/api/users/:id/username", verifyToken, (req, res) => {
+app.put("/api/users/:id/username", cookieAuthMiddleware, (req, res) => {
   const { id } = req.params;
   const { newUserName } = req.body;
   if (!newUserName) {
@@ -636,7 +636,7 @@ app.put("/api/users/:id/username", verifyToken, (req, res) => {
 // Restore appointments (finished)
 app.post(
   "/api/restore/appointments/finished",
-  verifyToken,
+  cookieAuthMiddleware,
   (req, res) => {
     const filePath = "./backup/finished_appointments.json";
     fs.readFile(filePath, "utf8", (err, data) => {
@@ -672,7 +672,7 @@ app.post(
 );
 
 // Restore users
-app.post("/api/restore/users", verifyToken, (req, res) => {
+app.post("/api/restore/users", cookieAuthMiddleware, (req, res) => {
   const filePath = "./backup/users.json";
   fs.readFile(filePath, "utf8", (err, data) => {
     if (err) {
@@ -726,7 +726,7 @@ app.post("/api/restore/users", verifyToken, (req, res) => {
   });
 });
 
-app.get("/api/appointments/finished", verifyToken, (req, res) => {
+app.get("/api/appointments/finished", cookieAuthMiddleware, (req, res) => {
   const sql =
     "SELECT * FROM appointments WHERE status = 'finished' ORDER BY date DESC, time DESC";
   db.query(sql, (err, results) => {
@@ -738,7 +738,7 @@ app.get("/api/appointments/finished", verifyToken, (req, res) => {
   });
 });
 
-app.get("/api/appointments/confirmed", verifyToken, (req, res) => {
+app.get("/api/appointments/confirmed", cookieAuthMiddleware, (req, res) => {
   const sql =
     "SELECT * FROM appointments WHERE status = 'confirmed' ORDER BY date DESC, time DESC";
   db.query(sql, (err, results) => {
@@ -750,7 +750,7 @@ app.get("/api/appointments/confirmed", verifyToken, (req, res) => {
   });
 });
 
-app.get("/api/appointments", verifyToken, (req, res) => {
+app.get("/api/appointments", cookieAuthMiddleware, (req, res) => {
   const sql = "SELECT * FROM appointments ORDER BY date DESC, time DESC";
   db.query(sql, (err, results) => {
     if (err) {
@@ -761,7 +761,7 @@ app.get("/api/appointments", verifyToken, (req, res) => {
   });
 });
 
-app.get("/api/current-user", verifyToken, (req, res) => {
+app.get("/api/current-user", cookieAuthMiddleware, (req, res) => {
   const { id } = req.user;
   const sql =
     "SELECT name, userName, lastName,  address, contact FROM users WHERE id = ?";
@@ -778,7 +778,7 @@ app.get("/api/current-user", verifyToken, (req, res) => {
 });
 
 // Generate and download Excel file for finished appointments
-app.get("/api/backup/appointments/excel", verifyToken, (req, res) => {
+app.get("/api/backup/appointments/excel", cookieAuthMiddleware, (req, res) => {
   const sql = "SELECT * FROM appointments WHERE status = 'finished'";
   db.query(sql, (err, results) => {
     if (err) {
@@ -826,7 +826,7 @@ app.get("/api/backup/appointments/excel", verifyToken, (req, res) => {
 });
 
 // Generate and download Excel file for users
-app.get("/api/backup/users/excel", verifyToken, (req, res) => {
+app.get("/api/backup/users/excel", cookieAuthMiddleware, (req, res) => {
   const sql =
     "SELECT id, name, userName, lastName, address, contact, role FROM users";
   db.query(sql, (err, results) => {
@@ -868,7 +868,7 @@ app.get("/api/backup/users/excel", verifyToken, (req, res) => {
 });
 
 // Fetch deleted users
-app.get("/api/deleted/users", verifyToken, (req, res) => {
+app.get("/api/deleted/users", cookieAuthMiddleware, (req, res) => {
   const sql = "SELECT * FROM deleted_users";
   db.query(sql, (err, results) => {
     if (err) {
@@ -880,7 +880,7 @@ app.get("/api/deleted/users", verifyToken, (req, res) => {
 });
 
 // Restore deleted users
-app.post("/api/restore/users", verifyToken, (req, res) => {
+app.post("/api/restore/users", cookieAuthMiddleware, (req, res) => {
   const { users } = req.body; // Array of users to restore
 
   if (!users || users.length === 0) {
@@ -911,7 +911,7 @@ app.post("/api/restore/users", verifyToken, (req, res) => {
 });
 
 // Fetch deleted appointments
-app.get("/api/deleted/appointments", verifyToken, (req, res) => {
+app.get("/api/deleted/appointments", cookieAuthMiddleware, (req, res) => {
   const sql = "SELECT * FROM deleted_appointments";
   db.query(sql, (err, results) => {
     if (err) {
@@ -923,7 +923,7 @@ app.get("/api/deleted/appointments", verifyToken, (req, res) => {
 });
 
 // Restore deleted appointments
-app.post("/api/restore/appointments", verifyToken, (req, res) => {
+app.post("/api/restore/appointments", cookieAuthMiddleware, (req, res) => {
   const filePath = "./backup/appointments.json";
   fs.readFile(filePath, "utf8", (err, data) => {
     if (err) {
