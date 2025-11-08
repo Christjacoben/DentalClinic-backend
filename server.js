@@ -42,7 +42,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://www.sungadentalclinic.com",
+    origin: "https://sungadentalclinic.com",
     credentials: true,
   })
 );
