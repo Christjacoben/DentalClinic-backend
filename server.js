@@ -1214,33 +1214,36 @@ app.post("/api/restore/appointments", cookieAuthMiddleware, (req, res) => {
 
 app.get("/api/sessions", cookieAuthMiddleware, (req, res) => {
   const sql = `
-    SELECT id, session_id, user_id, ip, user_agent, login_at, logout_at, last_seen, status, meta, action
+    SELECT
+      id,
+      session_id,
+      user_id,
+      ip,
+      user_agent,
+      -- return DATETIME as plain string so frontend won't interpret as UTC/ISO
+      DATE_FORMAT(login_at, '%Y-%m-%d %H:%i:%s') AS login_at,
+      DATE_FORMAT(logout_at, '%Y-%m-%d %H:%i:%s') AS logout_at,
+      status,
+      meta,
+      action,
+      last_seen
     FROM user_sessions
-    WHERE JSON_UNQUOTE(JSON_EXTRACT(meta, '$.role')) != 'admin'
-    ORDER BY login_at DESC
+    ORDER BY id DESC
   `;
   db.query(sql, (err, results) => {
     if (err) {
       console.error("Error fetching sessions:", err);
       return res.status(500).json({ message: "Database error." });
     }
-    const rows = results.map((r) => {
+    // normalize meta to object (if it's stored as JSON string)
+    const rows = (results || []).map((r) => {
       let meta = r.meta;
       try {
-        if (meta == null) {
-          meta = null;
-        } else if (typeof meta === "string") {
-          meta = JSON.parse(meta);
-        } else if (Buffer.isBuffer(meta)) {
-          const s = meta.toString("utf8");
-          meta = s ? JSON.parse(s) : null;
-        } else if (typeof meta === "object") {
-          // already an object -> keep as is
-        } else {
-          meta = null;
-        }
-      } catch (parseErr) {
-        console.error("Failed to parse meta for session id", r.id, parseErr);
+        if (meta == null) meta = null;
+        else if (typeof meta === "string") meta = JSON.parse(meta);
+        else if (Buffer.isBuffer(meta)) meta = JSON.parse(meta.toString("utf8"));
+      } catch (e) {
+        console.error("meta parse error for session id", r.id, e);
         meta = null;
       }
       return { ...r, meta };
