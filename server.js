@@ -7,6 +7,7 @@ const cookieParser = require("cookie-parser");
 const axios = require("axios");
 const cron = require("node-cron");
 const fs = require("fs");
+const crypto = require("crypto");
 const xlsx = require("xlsx"); // Import the xlsx library
 require("dotenv").config();
 
@@ -47,16 +48,91 @@ app.use(
   })
 );
 
+const addSessionAction = (opts, cb) => {
+  const { sessionId, userId, ip, ua, meta, status, action, logoutAt } = opts;
+  if (!sessionId) return cb && cb(new Error("no sessionId"));
+
+  db.query(
+    "SELECT login_at FROM user_sessions WHERE session_id = ? AND login_at IS NOT NULL ORDER BY id DESC LIMIT 1",
+    [sessionId],
+    (selErr, loginRows) => {
+      if (selErr)
+        console.error("Failed to fetch login_at for session:", selErr);
+      const loginAt = loginRows && loginRows[0] ? loginRows[0].login_at : null;
+
+      db.query(
+        "SELECT meta FROM user_sessions WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+        [sessionId],
+        (metaErr, metaRows) => {
+          if (metaErr)
+            console.error("Failed to fetch meta for session:", metaErr);
+
+          let storedMeta = null;
+          try {
+            if (metaRows && metaRows[0] && metaRows[0].meta) {
+              const raw = metaRows[0].meta;
+              storedMeta =
+                typeof raw === "string"
+                  ? JSON.parse(raw)
+                  : Buffer.isBuffer(raw)
+                  ? JSON.parse(raw.toString("utf8"))
+                  : raw;
+            }
+          } catch (parseErr) {
+            console.error("Failed to parse stored meta:", parseErr);
+            storedMeta = null;
+          }
+
+          const finalMeta = Object.assign({}, storedMeta || {}, meta || {});
+
+          const insertSql = `
+            INSERT INTO user_sessions
+              (session_id, user_id, ip, user_agent, meta, status, login_at, logout_at, last_seen, action)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+          `;
+          const params = [
+            sessionId,
+            userId || null,
+            ip || "",
+            ua || "",
+            JSON.stringify(finalMeta || {}),
+            status || "active",
+            loginAt,
+            logoutAt || null,
+            action || null,
+          ];
+
+          db.query(insertSql, params, (insErr, res) => {
+            if (insErr)
+              console.error("Failed to insert session action row:", insErr);
+            if (cb) cb(insErr, res);
+          });
+        }
+      );
+    }
+  );
+};
+
 const cookieAuthMiddleware = (req, res, next) => {
-  const token = req.cookies.token;
-  if (!token) {
-    return res.status(401).json({ error: "Access denied, No token provided." });
-  }
+  const token = req.cookies?.token;
+  if (!token) return res.status(401).json({ error: "No token provided." });
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
+    req.sessionId = decoded.sessionId || null;
+
+    if (req.sessionId) {
+      db.query(
+        "UPDATE user_sessions SET last_seen = NOW() WHERE session_id = ?",
+        [req.sessionId],
+        (err) => {
+          if (err) console.error("update last_seen error:", err);
+        }
+      );
+    }
+
     next();
-  } catch (error) {
+  } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token." });
   }
 };
@@ -76,7 +152,7 @@ cron.schedule("0 0 * * *", async () => {
       return;
     }
 
-    const now = new Date().setHours(0, 0, 0, 0); // Current date without time
+    const now = new Date().setHours(0, 0, 0, 0);
     results.forEach(async (appointment) => {
       const appointmentDate = new Date(appointment.date).setHours(0, 0, 0, 0);
 
@@ -143,6 +219,24 @@ app.post("/api/users", async (req, res) => {
   });
 });
 
+const getPHDateTime = () => {
+  const now = new Date();
+  const phTime = now.toLocaleString("en-PH", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Manila",
+  });
+
+  const [datePart, timePart] = phTime.split(", ");
+  const [month, day, year] = datePart.split("/");
+  return `${year}-${month}-${day} ${timePart}`;
+};
+
 app.post("/api/login", (req, res) => {
   console.log("Login request body:", req.body);
   const { userName, password } = req.body;
@@ -168,17 +262,19 @@ app.post("/api/login", (req, res) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
+    const sessionId = crypto.randomUUID();
     const token = jwt.sign(
       {
         id: user.id,
         userName: user.userName,
         role: user.role,
-        loginTime: new Date(),
+        sessionId,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
 
+    // set cookie
     res.cookie("token", token, {
       httpOnly: true,
       sameSite: "none",
@@ -186,10 +282,46 @@ app.post("/api/login", (req, res) => {
       maxAge: 60 * 60 * 1000,
     });
 
-    res.json({
-      message: "Login successful",
-      user: { id: user.id, userName: user.userName, role: user.role },
-    });
+    // build meta
+    const meta = {
+      name: user.name || null,
+      userName: user.userName || null,
+      role: user.role || null,
+      lastName: user.lastName || null,
+      address: user.address || null,
+      contact: user.contact || null,
+    };
+
+    const ip = req.ip || req.headers["x-forwarded-for"] || "";
+    const ua = req.get("User-Agent") || "";
+
+    // Get current PH time
+    const mysqlDatetime = getPHDateTime();
+
+    const insertSql = `
+      INSERT INTO user_sessions (session_id, user_id, ip, user_agent, meta, status, login_at, action)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    db.query(
+      insertSql,
+      [
+        sessionId,
+        user.id,
+        ip,
+        ua,
+        JSON.stringify(meta),
+        "active",
+        mysqlDatetime,
+        "login",
+      ],
+      (sessErr) => {
+        if (sessErr) console.error("Failed to create user session:", sessErr);
+        return res.json({
+          message: "Login successful",
+          user: { id: user.id, userName: user.userName, role: user.role },
+        });
+      }
+    );
   });
 });
 
@@ -206,11 +338,57 @@ app.get("/api/users/admin-exists", (req, res) => {
 });
 
 app.post("/api/logout", (req, res) => {
-  res.clearCookie("token", {
-    httpOnly: true,
-    sameSite: "none",
-    secure: true,
-  });
+  const token = req.cookies?.token;
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const sessionId = decoded.sessionId;
+      const userId = decoded.id;
+      if (sessionId) {
+        // Get current PH time
+        const mysqlDatetime = getPHDateTime();
+        const ip = req.ip || req.headers["x-forwarded-for"] || "";
+        const ua = req.get("User-Agent") || "";
+        const meta = {
+          userName: decoded.userName || null,
+          role: decoded.role || null,
+        };
+
+        const insertSql = `
+          INSERT INTO user_sessions
+            (session_id, user_id, ip, user_agent, meta, status, login_at, logout_at, last_seen, action)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+        `;
+
+        // replaced by helper to preserve login_at
+        addSessionAction(
+          {
+            sessionId,
+            userId,
+            ip,
+            ua,
+            meta,
+            status: "inactive",
+            action: "logout",
+            logoutAt: mysqlDatetime,
+          },
+          (err) => {
+            if (err) console.error("Error inserting logout session row:", err);
+            res.clearCookie("token", {
+              httpOnly: true,
+              sameSite: "none",
+              secure: true,
+            });
+            return res.json({ message: "Logged out successfully" });
+          }
+        );
+        return;
+      }
+    } catch (err) {
+      console.error("logout decode error:", err);
+    }
+  }
+  res.clearCookie("token", { httpOnly: true, sameSite: "none", secure: true });
   res.json({ message: "Logged out successfully" });
 });
 
@@ -318,6 +496,38 @@ app.post("/api/appointments", cookieAuthMiddleware, (req, res) => {
             console.error("Error saving appointment:", err);
             return res.status(500).json({ message: "Database error." });
           }
+
+          // record action as new session row (non-blocking)
+          if (req.sessionId && req.user) {
+            const ip = req.ip || req.headers["x-forwarded-for"] || "";
+            const ua = req.get("User-Agent") || "";
+            const meta = {
+              userName: req.user.userName || null,
+              role: req.user.role || null,
+            };
+
+            const insertSql = `
+              INSERT INTO user_sessions
+                (session_id, user_id, ip, user_agent, meta, status, login_at, logout_at, last_seen, action)
+              VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NOW(), ?)
+            `;
+            addSessionAction(
+              {
+                sessionId: req.sessionId,
+                userId: req.user.id,
+                ip,
+                ua,
+                meta,
+                status: "active",
+                action: "set_appointment",
+              },
+              (uErr) => {
+                if (uErr)
+                  console.error("Failed to create session action row:", uErr);
+              }
+            );
+          }
+
           res.status(201).json({ message: "Appointment saved successfully." });
         }
       );
@@ -630,6 +840,28 @@ app.put("/api/users/:id/username", cookieAuthMiddleware, (req, res) => {
       }
       res.json({ message: "Username updated successfully." });
     });
+  });
+});
+
+app.put("/api/users/:id", cookieAuthMiddleware, (req, res) => {
+  const { id } = req.params;
+  const { name, lastName, address, contact } = req.body;
+
+  if (!name || !lastName || !address || !contact) {
+    return res.status(400).json({ message: "All fields are required." });
+  }
+
+  const sql = `
+    UPDATE users
+    SET name = ?, lastName = ?, address = ?, contact = ?
+    WHERE id = ?
+  `;
+  db.query(sql, [name, lastName, address, contact, id], (err, result) => {
+    if (err) {
+      console.error("Error updating user:", err);
+      return res.status(500).json({ message: "Database error." });
+    }
+    res.json({ message: "User updated successfully." });
   });
 });
 
@@ -977,6 +1209,66 @@ app.post("/api/restore/appointments", cookieAuthMiddleware, (req, res) => {
       }
       res.json({ message: "Appointments restored successfully." });
     });
+  });
+});
+
+app.get("/api/sessions", cookieAuthMiddleware, (req, res) => {
+  const sql = `
+    SELECT id, session_id, user_id, ip, user_agent, login_at, logout_at, last_seen, status, meta, action
+    FROM user_sessions
+    WHERE JSON_UNQUOTE(JSON_EXTRACT(meta, '$.role')) != 'admin'
+    ORDER BY login_at DESC
+  `;
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("Error fetching sessions:", err);
+      return res.status(500).json({ message: "Database error." });
+    }
+    const rows = results.map((r) => {
+      let meta = r.meta;
+      try {
+        if (meta == null) {
+          meta = null;
+        } else if (typeof meta === "string") {
+          meta = JSON.parse(meta);
+        } else if (Buffer.isBuffer(meta)) {
+          const s = meta.toString("utf8");
+          meta = s ? JSON.parse(s) : null;
+        } else if (typeof meta === "object") {
+          // already an object -> keep as is
+        } else {
+          meta = null;
+        }
+      } catch (parseErr) {
+        console.error("Failed to parse meta for session id", r.id, parseErr);
+        meta = null;
+      }
+      return { ...r, meta };
+    });
+    res.json(rows);
+  });
+});
+
+app.get("/api/users/status", cookieAuthMiddleware, (req, res) => {
+  const sql = `
+    SELECT 
+      u.id, u.name, u.userName, u.lastName, u.address, u.contact, u.role,
+      CASE 
+        WHEN EXISTS (
+          SELECT 1 FROM user_sessions us
+          WHERE us.user_id = u.id AND us.status = 'active' AND us.logout_at IS NULL
+        ) THEN 'active'
+        ELSE 'inactive'
+      END AS status
+    FROM users u
+    ORDER BY u.name ASC
+  `;
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error("Error fetching users with status:", err);
+      return res.status(500).json({ message: "Database error." });
+    }
+    res.json(results);
   });
 });
 
