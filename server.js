@@ -1220,7 +1220,6 @@ app.get("/api/sessions", cookieAuthMiddleware, (req, res) => {
       user_id,
       ip,
       user_agent,
-      -- return DATETIME as plain string so frontend won't interpret as UTC/ISO
       DATE_FORMAT(login_at, '%Y-%m-%d %H:%i:%s') AS login_at,
       DATE_FORMAT(logout_at, '%Y-%m-%d %H:%i:%s') AS logout_at,
       status,
@@ -1228,14 +1227,14 @@ app.get("/api/sessions", cookieAuthMiddleware, (req, res) => {
       action,
       last_seen
     FROM user_sessions
-    ORDER BY id DESC
+    WHERE JSON_UNQUOTE(JSON_EXTRACT(meta, '$.role')) != 'admin'
+    ORDER BY login_at DESC
   `;
   db.query(sql, (err, results) => {
     if (err) {
       console.error("Error fetching sessions:", err);
       return res.status(500).json({ message: "Database error." });
     }
-    // normalize meta to object (if it's stored as JSON string)
     const rows = (results || []).map((r) => {
       let meta = r.meta;
       try {
