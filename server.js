@@ -414,6 +414,31 @@ app.post("/api/user-info", cookieAuthMiddleware, (req, res) => {
       console.error("Error updating user info:", err);
       return res.status(500).json({ message: "Database error." });
     }
+
+    // Log session action
+    if (req.sessionId && req.user) {
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const ua = req.get("User-Agent") || "";
+      const meta = {
+        userName: req.user.userName || null,
+        role: req.user.role || null,
+      };
+      addSessionAction(
+        {
+          sessionId: req.sessionId,
+          userId: req.user.id,
+          ip,
+          ua,
+          meta,
+          status: "active",
+          action: "update_user_info",
+        },
+        (uErr) => {
+          if (uErr) console.error("Failed to create session action row:", uErr);
+        }
+      );
+    }
+
     res.json({ message: "User info updated successfully." });
   });
 });
@@ -549,6 +574,31 @@ app.post(
         return res.status(500).json({ message: "Database error." });
       }
 
+      // Log session action
+      if (req.sessionId && req.user) {
+        const ip = req.ip || req.headers["x-forwarded-for"] || "";
+        const ua = req.get("User-Agent") || "";
+        const meta = {
+          userName: req.user.userName || null,
+          role: req.user.role || null,
+        };
+        addSessionAction(
+          {
+            sessionId: req.sessionId,
+            userId: req.user.id,
+            ip,
+            ua,
+            meta,
+            status: "active",
+            action: "confirm_appointment",
+          },
+          (uErr) => {
+            if (uErr)
+              console.error("Failed to create session action row:", uErr);
+          }
+        );
+      }
+
       let formattedDate = "";
       try {
         formattedDate = new Date(date).toLocaleDateString("en-PH", {
@@ -595,6 +645,31 @@ app.post("/api/appointments/:id/finish", cookieAuthMiddleware, (req, res) => {
       console.error("Error updating appointment status:", err);
       return res.status(500).json({ message: "Database error." });
     }
+
+    // Log session action
+    if (req.sessionId && req.user) {
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const ua = req.get("User-Agent") || "";
+      const meta = {
+        userName: req.user.userName || null,
+        role: req.user.role || null,
+      };
+      addSessionAction(
+        {
+          sessionId: req.sessionId,
+          userId: req.user.id,
+          ip,
+          ua,
+          meta,
+          status: "active",
+          action: "finish_appointment",
+        },
+        (uErr) => {
+          if (uErr) console.error("Failed to create session action row:", uErr);
+        }
+      );
+    }
+
     res.json({ message: "Appointment marked as finished." });
   });
 });
@@ -653,6 +728,33 @@ app.delete("/api/users/:id", cookieAuthMiddleware, (req, res) => {
             console.error("Error deleting user:", err3);
             return res.status(500).json({ message: "Database error." });
           }
+
+          // Log session action
+          if (req.sessionId && req.user) {
+            const ip = req.ip || req.headers["x-forwarded-for"] || "";
+            const ua = req.get("User-Agent") || "";
+            const meta = {
+              userName: req.user.userName || null,
+              role: req.user.role || null,
+              deletedUserId: id,
+            };
+            addSessionAction(
+              {
+                sessionId: req.sessionId,
+                userId: req.user.id,
+                ip,
+                ua,
+                meta,
+                status: "active",
+                action: "delete_user",
+              },
+              (uErr) => {
+                if (uErr)
+                  console.error("Failed to create session action row:", uErr);
+              }
+            );
+          }
+
           res.json({ message: "User deleted successfully." });
         });
       }
@@ -705,6 +807,33 @@ app.delete("/api/appointments/:id", cookieAuthMiddleware, (req, res) => {
             console.error("Error deleting appointment:", err3);
             return res.status(500).json({ message: "Database error." });
           }
+
+          // Log session action
+          if (req.sessionId && req.user) {
+            const ip = req.ip || req.headers["x-forwarded-for"] || "";
+            const ua = req.get("User-Agent") || "";
+            const meta = {
+              userName: req.user.userName || null,
+              role: req.user.role || null,
+              deletedAppointmentId: id,
+            };
+            addSessionAction(
+              {
+                sessionId: req.sessionId,
+                userId: req.user.id,
+                ip,
+                ua,
+                meta,
+                status: "active",
+                action: "delete_appointment",
+              },
+              (uErr) => {
+                if (uErr)
+                  console.error("Failed to create session action row:", uErr);
+              }
+            );
+          }
+
           res.json({ message: "Appointment deleted successfully." });
         });
       }
@@ -742,6 +871,31 @@ app.put(
         if (err2) {
           console.error("Error rescheduling appointment:", err2);
           return res.status(500).json({ message: "Database error." });
+        }
+
+        // Log session action
+        if (req.sessionId && req.user) {
+          const ip = req.ip || req.headers["x-forwarded-for"] || "";
+          const ua = req.get("User-Agent") || "";
+          const meta = {
+            userName: req.user.userName || null,
+            role: req.user.role || null,
+          };
+          addSessionAction(
+            {
+              sessionId: req.sessionId,
+              userId: req.user.id,
+              ip,
+              ua,
+              meta,
+              status: "active",
+              action: "reschedule_appointment",
+            },
+            (uErr) => {
+              if (uErr)
+                console.error("Failed to create session action row:", uErr);
+            }
+          );
         }
 
         let formattedDate = "";
@@ -809,6 +963,33 @@ app.put("/api/users/:id/password", cookieAuthMiddleware, async (req, res) => {
         console.error("Error updating password:", err);
         return res.status(500).json({ message: "Database error." });
       }
+
+      // Log session action
+      if (req.sessionId && req.user) {
+        const ip = req.ip || req.headers["x-forwarded-for"] || "";
+        const ua = req.get("User-Agent") || "";
+        const meta = {
+          userName: req.user.userName || null,
+          role: req.user.role || null,
+          targetUserId: id,
+        };
+        addSessionAction(
+          {
+            sessionId: req.sessionId,
+            userId: req.user.id,
+            ip,
+            ua,
+            meta,
+            status: "active",
+            action: "update_password",
+          },
+          (uErr) => {
+            if (uErr)
+              console.error("Failed to create session action row:", uErr);
+          }
+        );
+      }
+
       res.json({ message: "Password updated successfully." });
     });
   } catch (err) {
@@ -838,6 +1019,33 @@ app.put("/api/users/:id/username", cookieAuthMiddleware, (req, res) => {
         console.error("Error updating username:", err);
         return res.status(500).json({ message: "Database error." });
       }
+
+      // Log session action
+      if (req.sessionId && req.user) {
+        const ip = req.ip || req.headers["x-forwarded-for"] || "";
+        const ua = req.get("User-Agent") || "";
+        const meta = {
+          userName: req.user.userName || null,
+          role: req.user.role || null,
+          targetUserId: id,
+        };
+        addSessionAction(
+          {
+            sessionId: req.sessionId,
+            userId: req.user.id,
+            ip,
+            ua,
+            meta,
+            status: "active",
+            action: "update_username",
+          },
+          (uErr) => {
+            if (uErr)
+              console.error("Failed to create session action row:", uErr);
+          }
+        );
+      }
+
       res.json({ message: "Username updated successfully." });
     });
   });
@@ -861,6 +1069,32 @@ app.put("/api/users/:id", cookieAuthMiddleware, (req, res) => {
       console.error("Error updating user:", err);
       return res.status(500).json({ message: "Database error." });
     }
+
+    // Log session action
+    if (req.sessionId && req.user) {
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const ua = req.get("User-Agent") || "";
+      const meta = {
+        userName: req.user.userName || null,
+        role: req.user.role || null,
+        targetUserId: id,
+      };
+      addSessionAction(
+        {
+          sessionId: req.sessionId,
+          userId: req.user.id,
+          ip,
+          ua,
+          meta,
+          status: "active",
+          action: "update_user",
+        },
+        (uErr) => {
+          if (uErr) console.error("Failed to create session action row:", uErr);
+        }
+      );
+    }
+
     res.json({ message: "User updated successfully." });
   });
 });
@@ -897,6 +1131,33 @@ app.post(
           console.error("Error restoring appointments:", err);
           return res.status(500).json({ message: "Database error." });
         }
+
+        // Log session action
+        if (req.sessionId && req.user) {
+          const ip = req.ip || req.headers["x-forwarded-for"] || "";
+          const ua = req.get("User-Agent") || "";
+          const meta = {
+            userName: req.user.userName || null,
+            role: req.user.role || null,
+            restoredCount: appointments.length,
+          };
+          addSessionAction(
+            {
+              sessionId: req.sessionId,
+              userId: req.user.id,
+              ip,
+              ua,
+              meta,
+              status: "active",
+              action: "restore_finished_appointments",
+            },
+            (uErr) => {
+              if (uErr)
+                console.error("Failed to create session action row:", uErr);
+            }
+          );
+        }
+
         res.json({ message: "Appointments restored successfully." });
       });
     });
@@ -953,6 +1214,33 @@ app.post("/api/restore/users", cookieAuthMiddleware, (req, res) => {
         console.error("Error restoring users:", err);
         return res.status(500).json({ message: "Database error." });
       }
+
+      // Log session action
+      if (req.sessionId && req.user) {
+        const ip = req.ip || req.headers["x-forwarded-for"] || "";
+        const ua = req.get("User-Agent") || "";
+        const meta = {
+          userName: req.user.userName || null,
+          role: req.user.role || null,
+          restoredCount: users.length,
+        };
+        addSessionAction(
+          {
+            sessionId: req.sessionId,
+            userId: req.user.id,
+            ip,
+            ua,
+            meta,
+            status: "active",
+            action: "restore_users",
+          },
+          (uErr) => {
+            if (uErr)
+              console.error("Failed to create session action row:", uErr);
+          }
+        );
+      }
+
       res.json({ message: "Users restored successfully." });
     });
   });
@@ -1138,6 +1426,32 @@ app.post("/api/restore/users", cookieAuthMiddleware, (req, res) => {
       console.error("Error restoring users:", err);
       return res.status(500).json({ message: "Database error." });
     }
+
+    // Log session action
+    if (req.sessionId && req.user) {
+      const ip = req.ip || req.headers["x-forwarded-for"] || "";
+      const ua = req.get("User-Agent") || "";
+      const meta = {
+        userName: req.user.userName || null,
+        role: req.user.role || null,
+        restoredDeletedUsers: users.length,
+      };
+      addSessionAction(
+        {
+          sessionId: req.sessionId,
+          userId: req.user.id,
+          ip,
+          ua,
+          meta,
+          status: "active",
+          action: "restore_deleted_users",
+        },
+        (uErr) => {
+          if (uErr) console.error("Failed to create session action row:", uErr);
+        }
+      );
+    }
+
     res.json({ message: "Users restored successfully." });
   });
 });
@@ -1207,6 +1521,33 @@ app.post("/api/restore/appointments", cookieAuthMiddleware, (req, res) => {
         console.error("Error restoring appointments:", err);
         return res.status(500).json({ message: "Database error." });
       }
+
+      // Log session action
+      if (req.sessionId && req.user) {
+        const ip = req.ip || req.headers["x-forwarded-for"] || "";
+        const ua = req.get("User-Agent") || "";
+        const meta = {
+          userName: req.user.userName || null,
+          role: req.user.role || null,
+          restoredCount: appointments.length,
+        };
+        addSessionAction(
+          {
+            sessionId: req.sessionId,
+            userId: req.user.id,
+            ip,
+            ua,
+            meta,
+            status: "active",
+            action: "restore_deleted_appointments",
+          },
+          (uErr) => {
+            if (uErr)
+              console.error("Failed to create session action row:", uErr);
+          }
+        );
+      }
+
       res.json({ message: "Appointments restored successfully." });
     });
   });
@@ -1227,7 +1568,6 @@ app.get("/api/sessions", cookieAuthMiddleware, (req, res) => {
       action,
       last_seen
     FROM user_sessions
-    WHERE JSON_UNQUOTE(JSON_EXTRACT(meta, '$.role')) != 'admin'
     ORDER BY login_at DESC
   `;
   db.query(sql, (err, results) => {
@@ -1240,7 +1580,8 @@ app.get("/api/sessions", cookieAuthMiddleware, (req, res) => {
       try {
         if (meta == null) meta = null;
         else if (typeof meta === "string") meta = JSON.parse(meta);
-        else if (Buffer.isBuffer(meta)) meta = JSON.parse(meta.toString("utf8"));
+        else if (Buffer.isBuffer(meta))
+          meta = JSON.parse(meta.toString("utf8"));
       } catch (e) {
         console.error("meta parse error for session id", r.id, e);
         meta = null;
@@ -1273,6 +1614,7 @@ app.get("/api/users/status", cookieAuthMiddleware, (req, res) => {
     res.json(results);
   });
 });
+
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
